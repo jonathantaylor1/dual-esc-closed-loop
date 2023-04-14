@@ -54,6 +54,8 @@ uint8_t rxdata = 0; // for UART receive data
 const uint32_t PRD_ARR_SIZE = PRD_ARR_OPEN_ACC_NUMEL + PRD_ARR_CLOSED_REF_NUMEL;
 float_t prdArr[PRD_ARR_OPEN_ACC_NUMEL + PRD_ARR_CLOSED_REF_NUMEL];
 
+uint32_t cmdFreqArr[CMD_FREQ_ARR_SIZE];
+
 int16_t piSum = 0;
 
 Motor_TypeDef motor1;
@@ -62,6 +64,8 @@ Motor_TypeDef motor2;
 uint8_t ctrlState = STATE_CTRL_RUN;
 uint8_t sysEn = 0;
 uint32_t uvloCtr = 0;
+
+int32_t fluxIntSumDebugArr[1000];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -939,7 +943,7 @@ void motorsInit(void)
 	motor1.isPrevValValid = 0;
 	motor1.isMeasuredFreqValid = 0;
 	motor1.piMax = OPEN_DUTY_COEFF/5+OPEN_DUTY_OFFSET;
-	motor1.piMin = OPEN_DUTY_COEFF/prdArr[PRD_ARR_OPEN_ACC_NUMEL-1] + OPEN_DUTY_OFFSET;
+	motor1.piMin = 300;
 
 	motor2.phaseId = PHASE_ID_UVW;
 	motor2.zPhaseAdcRank = LL_ADC_REG_RANK_2;
@@ -966,7 +970,7 @@ void motorsInit(void)
 	motor2.isPrevValValid = 0;
 	motor2.isMeasuredFreqValid = 0;
 	motor2.piMax = OPEN_DUTY_COEFF/5+OPEN_DUTY_OFFSET;
-	motor2.piMin = OPEN_DUTY_COEFF/prdArr[PRD_ARR_OPEN_ACC_NUMEL-1] + OPEN_DUTY_OFFSET;
+	motor2.piMin = 300;
 }
 
 void arraysInit(void)
@@ -975,6 +979,12 @@ void arraysInit(void)
 	for(int i = 1; i < PRD_ARR_SIZE; i++)
 	{
 		prdArr[i] = (prdArr[i-1]/(OPEN_ALPHA*6.0*prdArr[i-1]*prdArr[i-1]*T_SAMP*T_SAMP+1.0));
+	}
+
+	cmdFreqArr[0] = 0;
+	for(int i = 1; i < CMD_FREQ_ARR_SIZE; i++)
+	{
+		cmdFreqArr[i] = (i*(CMD_FREQ_MAX - CMD_FREQ_MIN))/126 + CMD_FREQ_MIN;
 	}
 }
 
@@ -1080,23 +1090,9 @@ void uartRxCpltCallback()
 		{
 			if(sysEn == 1)
 			{
-				if(rxdata == 0)
-				{
-					motor1.cmdPrd = 0xffffffff;
-					motor1.cmdFreq = 0;
-					txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 1: 0 RPM\n\r");
-					uartTx((uint32_t*) txdata, txlength);
-				}
-				else
-				{
-					// Val is between 1 to 126
-					// Set motor 1 cmd prd
-					motor1.cmdPrdArrIdx = (PRD_ARR_OPEN_ACC_NUMEL - 1) + (PRD_ARR_CLOSED_REF_NUMEL*rxdata)/127;
-					motor1.cmdPrd = (uint32_t) prdArr[motor1.cmdPrdArrIdx];
-					motor1.cmdFreq = (F_SAMP/6)/motor1.cmdPrd;
-					txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 1: %d RPM\n\r", (int) (30*motor1.cmdFreq));
-					uartTx((uint32_t*) txdata, txlength);
-				}
+				motor1.cmdFreq = cmdFreqArr[rxdata];
+				txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 1: %d RPM\n\r", (int) (30*motor1.cmdFreq));
+				uartTx((uint32_t*) txdata, txlength);
 			}
 			else
 			{
@@ -1108,23 +1104,9 @@ void uartRxCpltCallback()
 		{
 			if(sysEn == 1)
 			{
-				if(rxdata == 128)
-				{
-					motor2.cmdPrd = 0xffffffff;
-					motor2.cmdFreq = 0;
-					txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 2: 0 RPM\n\r");
-					uartTx((uint32_t*) txdata, txlength);
-				}
-				else
-				{
-					// Val is between 129 to 254
-					// Set motor 2 cmd prd
-					motor2.cmdPrdArrIdx = (PRD_ARR_OPEN_ACC_NUMEL - 1) + (PRD_ARR_CLOSED_REF_NUMEL*(rxdata-128))/127;
-					motor2.cmdPrd = (uint32_t) prdArr[motor2.cmdPrdArrIdx];
-					motor2.cmdFreq = (F_SAMP/6)/motor2.cmdPrd;
-					txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 2: %d RPM\n\r", (int) (30*motor2.cmdFreq));
-					uartTx((uint32_t*) txdata, txlength);
-				}
+				motor2.cmdFreq = cmdFreqArr[(rxdata-128)];
+				txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Motor 2: %d RPM\n\r", (int) (30*motor2.cmdFreq));
+				uartTx((uint32_t*) txdata, txlength);
 			}
 			else
 			{
@@ -1144,108 +1126,107 @@ void uartRxCpltCallback()
 
 void setPWM(Motor_TypeDef* motor, uint8_t newStep, uint32_t compare)
 {
-	if(motor->step != newStep)
+
+	switch(newStep)
 	{
-		switch(newStep)
-		{
-		case STEP_Z:
-			motor->phase1EnableCompare = 0;
-			motor->phase1PWMCompare = 0;
+	case STEP_Z:
+		motor->phase1EnableCompare = 0;
+		motor->phase1PWMCompare = 0;
 
-			motor->phase2EnableCompare = 0;
-			motor->phase2PWMCompare = 0;
+		motor->phase2EnableCompare = 0;
+		motor->phase2PWMCompare = 0;
 
-			motor->phase3EnableCompare = 0;
-			motor->phase3PWMCompare = 0;
-			break;
+		motor->phase3EnableCompare = 0;
+		motor->phase3PWMCompare = 0;
+		break;
 
-		case STEP_0: // PNZ
-			motor->phase1EnableCompare = 0xffff;
-			motor->phase1PWMCompare = compare;
+	case STEP_0: // PNZ
+		motor->phase1EnableCompare = 0xffff;
+		motor->phase1PWMCompare = compare;
 
-			motor->phase2EnableCompare = 0xffff;
-			motor->phase2PWMCompare = 0;
+		motor->phase2EnableCompare = 0xffff;
+		motor->phase2PWMCompare = 0;
 
-			motor->phase3EnableCompare = 0;
-			motor->phase3PWMCompare = 0;
+		motor->phase3EnableCompare = 0;
+		motor->phase3PWMCompare = 0;
 
-			motor->adcActiveChannel = motor->phase3adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase3adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase3adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase3adcChannel);
+		break;
 
-		case STEP_1: // PZN
-			motor->phase1EnableCompare = 0xffff;
-			motor->phase1PWMCompare = compare;
+	case STEP_1: // PZN
+		motor->phase1EnableCompare = 0xffff;
+		motor->phase1PWMCompare = compare;
 
-			motor->phase2EnableCompare = 0;
-			motor->phase2PWMCompare = 0;
+		motor->phase2EnableCompare = 0;
+		motor->phase2PWMCompare = 0;
 
-			motor->phase3EnableCompare = 0xffff;
-			motor->phase3PWMCompare = 0;
+		motor->phase3EnableCompare = 0xffff;
+		motor->phase3PWMCompare = 0;
 
-			motor->adcActiveChannel = motor->phase2adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase2adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase2adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase2adcChannel);
+		break;
 
-		case STEP_2: // ZPN
-			motor->phase1EnableCompare = 0;
-			motor->phase1PWMCompare = 0;
+	case STEP_2: // ZPN
+		motor->phase1EnableCompare = 0;
+		motor->phase1PWMCompare = 0;
 
-			motor->phase2EnableCompare = 0xffff;
-			motor->phase2PWMCompare = compare;
+		motor->phase2EnableCompare = 0xffff;
+		motor->phase2PWMCompare = compare;
 
-			motor->phase3EnableCompare = 0xffff;
-			motor->phase3PWMCompare = 0;
+		motor->phase3EnableCompare = 0xffff;
+		motor->phase3PWMCompare = 0;
 
-			motor->adcActiveChannel = motor->phase1adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase1adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase1adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase1adcChannel);
+		break;
 
-		case STEP_3: // NPZ
-			motor->phase1EnableCompare = 0xffff;
-			motor->phase1PWMCompare = 0;
+	case STEP_3: // NPZ
+		motor->phase1EnableCompare = 0xffff;
+		motor->phase1PWMCompare = 0;
 
-			motor->phase2EnableCompare = 0xffff;
-			motor->phase2PWMCompare = compare;
+		motor->phase2EnableCompare = 0xffff;
+		motor->phase2PWMCompare = compare;
 
-			motor->phase3EnableCompare = 0;
-			motor->phase3PWMCompare = 0;
+		motor->phase3EnableCompare = 0;
+		motor->phase3PWMCompare = 0;
 
-			motor->adcActiveChannel = motor->phase3adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase3adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase3adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase3adcChannel);
+		break;
 
-		case STEP_4: // NZP
-			motor->phase1EnableCompare = 0xffff;
-			motor->phase1PWMCompare = 0;
+	case STEP_4: // NZP
+		motor->phase1EnableCompare = 0xffff;
+		motor->phase1PWMCompare = 0;
 
-			motor->phase2EnableCompare = 0;
-			motor->phase2PWMCompare = 0;
+		motor->phase2EnableCompare = 0;
+		motor->phase2PWMCompare = 0;
 
-			motor->phase3EnableCompare = 0xffff;
-			motor->phase3PWMCompare = compare;
+		motor->phase3EnableCompare = 0xffff;
+		motor->phase3PWMCompare = compare;
 
-			motor->adcActiveChannel = motor->phase2adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase2adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase2adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase2adcChannel);
+		break;
 
-		case STEP_5: // ZNP
-			motor->phase1EnableCompare = 0;
-			motor->phase1PWMCompare = 0;
+	case STEP_5: // ZNP
+		motor->phase1EnableCompare = 0;
+		motor->phase1PWMCompare = 0;
 
-			motor->phase2EnableCompare = 0xffff;
-			motor->phase2PWMCompare = 0;
+		motor->phase2EnableCompare = 0xffff;
+		motor->phase2PWMCompare = 0;
 
-			motor->phase3EnableCompare = 0xffff;
-			motor->phase3PWMCompare = compare;
+		motor->phase3EnableCompare = 0xffff;
+		motor->phase3PWMCompare = compare;
 
-			motor->adcActiveChannel = motor->phase1adcChannel;
-			//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase1adcChannel);
-			break;
+		motor->adcActiveChannel = motor->phase1adcChannel;
+		//LL_ADC_REG_SetSequencerRanks(ADC1, motor->zPhaseAdcRank, motor->phase1adcChannel);
+		break;
 
-		default:
-			break;
-		}
+	default:
+		break;
+	}
 
 		if(motor->phaseId == PHASE_ID_ABC)
 		{
@@ -1267,10 +1248,7 @@ void setPWM(Motor_TypeDef* motor, uint8_t newStep, uint32_t compare)
 			LL_TIM_OC_SetCompareCH2(TIM4, motor->phase2EnableCompare);
 			LL_TIM_OC_SetCompareCH3(TIM4, motor->phase3EnableCompare);
 		}
-
 		motor->step = newStep;
-	}
-
 }
 
 void adcConvCpltCallback(void)
@@ -1379,11 +1357,24 @@ void changeState(Motor_TypeDef* motor, uint8_t newState)
 			motor->isMeasuredFreqValid = 0;
 			motor->openPrdArrIdx = 0;
 			motor->openPrdCtr = 0;
+			motor->openAccCtr = 0;
 			motor->ctr = 0;
 			motor->duty = 0;
 			motor->cmdPrd = 0xffffffff;
 			motor->cmdFreq = 0;
 			motor->prd = OPEN_INIT_PRD;
+			break;
+
+		case STATE_MOTOR_ALIGN_3:
+			motor->ctr = 0;
+			motor->duty = ALIGN_DUTY;
+			setPWM(motor, STEP_3, motor->duty);
+			break;
+
+		case STATE_MOTOR_ALIGN_4:
+			motor->ctr = 0;
+			motor->duty = ALIGN_DUTY;
+			setPWM(motor, STEP_4, motor->duty);
 			break;
 
 		case STATE_MOTOR_OPEN_ACC_0:
@@ -1638,6 +1629,28 @@ void stateEval(Motor_TypeDef* motor)
 		{
 			motor->openPrdCtr = 0;
 			motor->prd = prdArr[motor->openPrdCtr];
+			changeState(motor, STATE_MOTOR_ALIGN_3);
+		}
+		break;
+
+	case STATE_MOTOR_ALIGN_3:
+		if(motor->ctr < ALIGN_TIMEOUT)
+		{
+			motor->ctr++;
+		}
+		else
+		{
+			changeState(motor, STATE_MOTOR_ALIGN_4);
+		}
+		break;
+
+	case STATE_MOTOR_ALIGN_4:
+		if(motor->ctr < ALIGN_TIMEOUT)
+		{
+			motor->ctr++;
+		}
+		else
+		{
 			changeState(motor, STATE_MOTOR_OPEN_ACC_0);
 		}
 		break;
@@ -1650,16 +1663,18 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_0, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_0:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_0, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
 					changeState(motor, STATE_MOTOR_OPEN_ACC_1);
@@ -1673,16 +1688,8 @@ void stateEval(Motor_TypeDef* motor)
 		else
 		{
 			// ENTER CLOSED LOOP
-			if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-			// changeState to STATE_MOTOR_CLOSED_GET_SPD_WATCH_0 sets the following values:
-			// motor->isPrevValValid = 0;
-			// motor->ctr = 0;
-			// motor->getSpdCtr = 0;
-			// motor->closedWatchTimeout = motor->prd;
-			// motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
-			// setPWM(motor, STEP_0, motor->duty);
-			//changeState(motor, STATE_MOTOR_CLOSED_GET_SPD_WATCH_0);
-			motor->piSum = PI_INT_CONST*F_SAMP*motor->duty;
+			//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+			motor->piSum = (F_SAMP*motor->duty)/PI_INT_CONST;
 			changeState(motor, STATE_MOTOR_HANDOFF_0);
 		}
 		break;
@@ -1695,16 +1702,18 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_1, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_1:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_1, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
 					changeState(motor, STATE_MOTOR_OPEN_ACC_2);
@@ -1717,21 +1726,13 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			// RUN OPEN AT CONSTANT SPEED
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
 			}
 			else
 			{
-				if(motor->dir == MOTOR_DIRECTION_FWD)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_2);
-				}
-				else if (motor->dir == MOTOR_DIRECTION_REV)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_0);
-				}
+				changeState(motor, STATE_MOTOR_OPEN_ACC_2);
 			}
 		}
 		break;
@@ -1744,16 +1745,18 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_2, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_2:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_2, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
 					changeState(motor, STATE_MOTOR_OPEN_ACC_3);
@@ -1766,21 +1769,13 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			// RUN OPEN AT CONSTANT SPEED
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
 			}
 			else
 			{
-				if(motor->dir == MOTOR_DIRECTION_FWD)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_3);
-				}
-				else if (motor->dir == MOTOR_DIRECTION_REV)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_1);
-				}
+				changeState(motor, STATE_MOTOR_OPEN_ACC_3);
 			}
 		}
 		break;
@@ -1793,16 +1788,18 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_3, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_3:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_3, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
 					changeState(motor, STATE_MOTOR_OPEN_ACC_4);
@@ -1815,21 +1812,13 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			// RUN OPEN AT CONSTANT SPEED
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
 			}
 			else
 			{
-				if(motor->dir == MOTOR_DIRECTION_FWD)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_4);
-				}
-				else if (motor->dir == MOTOR_DIRECTION_REV)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_2);
-				}
+				changeState(motor, STATE_MOTOR_OPEN_ACC_4);
 			}
 		}
 		break;
@@ -1842,16 +1831,18 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_4, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_4:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_4, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
 					changeState(motor, STATE_MOTOR_OPEN_ACC_5);
@@ -1864,21 +1855,13 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			// RUN OPEN AT CONSTANT SPEED
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
 			}
 			else
 			{
-				if(motor->dir == MOTOR_DIRECTION_FWD)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_5);
-				}
-				else if (motor->dir == MOTOR_DIRECTION_REV)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_3);
-				}
+				changeState(motor, STATE_MOTOR_OPEN_ACC_5);
 			}
 		}
 		break;
@@ -1891,19 +1874,20 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. duty = OPEN_DUTY_COEFF/motor->prd+OPEN_DUTY_OFFSET
 	// 4. setPWM(motor, STEP_5, motor->duty)
 	case STATE_MOTOR_OPEN_ACC_5:
-		if(motor->openPrdCtr < PRD_ARR_OPEN_ACC_NUMEL)
+		if(motor->prd > HANDOFF_PRD)
 		{
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
+				motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
+				setPWM(motor, STEP_5, motor->duty);
+				motor->openAccCtr++;
+				motor->prd = F_SAMP_SQRD/(SIX_A1*motor->openAccCtr+(THREE_A2*motor->openAccCtr*motor->openAccCtr)/F_SAMP);
 			}
 			else
 			{
-				motor->prd = (uint32_t) prdArr[motor->openPrdCtr];
-				motor->openPrdCtr++;
 				if(motor->dir == MOTOR_DIRECTION_FWD)
 				{
-
 					changeState(motor, STATE_MOTOR_OPEN_ACC_0);
 				}
 				else if (motor->dir == MOTOR_DIRECTION_REV)
@@ -1914,21 +1898,13 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			// RUN OPEN AT CONSTANT SPEED
 			if(motor->ctr < motor->prd)
 			{
 				motor->ctr++;
 			}
 			else
 			{
-				if(motor->dir == MOTOR_DIRECTION_FWD)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_0);
-				}
-				else if (motor->dir == MOTOR_DIRECTION_REV)
-				{
-					changeState(motor, STATE_MOTOR_OPEN_ACC_4);
-				}
+				changeState(motor, STATE_MOTOR_OPEN_ACC_0);
 			}
 		}
 		break;
@@ -1940,7 +1916,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_0, motor->duty);
 	case STATE_MOTOR_HANDOFF_0:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -1948,7 +1924,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
 				    (motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_0);
 				}
 			}
@@ -1959,7 +1935,9 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_1);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -1970,7 +1948,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_1, motor->duty);
 	case STATE_MOTOR_HANDOFF_1:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -1978,7 +1956,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
 					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_1);
 				}
 			}
@@ -1989,7 +1967,9 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_2);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2000,7 +1980,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_2, motor->duty);
 	case STATE_MOTOR_HANDOFF_2:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -2008,7 +1988,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
 					(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_2);
 				}
 			}
@@ -2019,7 +1999,9 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_3);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2030,7 +2012,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_3, motor->duty);
 	case STATE_MOTOR_HANDOFF_3:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -2038,7 +2020,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
 					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_3);
 				}
 			}
@@ -2049,7 +2031,9 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_4);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2060,7 +2044,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_4, motor->duty);
 	case STATE_MOTOR_HANDOFF_4:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -2068,7 +2052,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
 					(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_4);
 				}
 			}
@@ -2079,7 +2063,9 @@ void stateEval(Motor_TypeDef* motor)
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_5);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2090,7 +2076,7 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_5, motor->duty);
 	case STATE_MOTOR_HANDOFF_5:
-		if(motor->ctr < motor->prd)
+		if(motor->ctr < CLOSED_TIMEOUT)
 		{
 			motor->ctr++;
 			if(motor->ctr > BLANK_TIME)
@@ -2098,7 +2084,7 @@ void stateEval(Motor_TypeDef* motor)
 				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
 					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+					//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 					changeState(motor, STATE_MOTOR_CLOSED_INT_5);
 				}
 			}
@@ -2243,7 +2229,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 0.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_0);
 				}
@@ -2257,6 +2243,7 @@ void stateEval(Motor_TypeDef* motor)
 		{
 			// If no zero cross detected, stop motor
 			changeState(motor, STATE_MOTOR_STOP);
+			//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "No ZC in WATCH 0!\n\r");
 			uartTx((uint32_t*) txdata, txlength);
 		}
@@ -2282,13 +2269,14 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_0, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			if((motor->fluxIntSum < FLUX_LOW_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_1);
 			}
 		}
 		else
 		{
+			//if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 			changeState(motor, STATE_MOTOR_STOP);
 			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "INT 0 timeout!\n\r");
 			uartTx((uint32_t*) txdata, txlength);
@@ -2318,7 +2306,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 1.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_1);
 				}
@@ -2332,6 +2320,7 @@ void stateEval(Motor_TypeDef* motor)
 		{
 			// If no zero cross detected, stop motor
 			changeState(motor, STATE_MOTOR_STOP);
+			if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
 			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "No ZC in WATCH 1!\n\r");
 			uartTx((uint32_t*) txdata, txlength);
 		}
@@ -2360,7 +2349,11 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_1, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			if((motor2.cmdFreq != 0) && (motor->phaseId == PHASE_ID_ABC))
+			{
+				fluxIntSumDebugArr[motor1.ctr] = motor1.fluxIntSum;
+			}
+			if((motor->fluxIntSum > FLUX_HIGH_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_2);
 			}
@@ -2368,7 +2361,8 @@ void stateEval(Motor_TypeDef* motor)
 		else
 		{
 			changeState(motor, STATE_MOTOR_STOP);
-			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "INT 1 timeout!\n\r");
+			if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "INT 1 timeout! fluxIntSum: %d\n\r", (int) motor->fluxIntSum);
 			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
@@ -2401,7 +2395,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 2.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_2);
 				}
@@ -2431,7 +2425,7 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_2, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			if((motor->fluxIntSum < FLUX_LOW_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_3);
 			}
@@ -2464,7 +2458,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 3.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_3);
 				}
@@ -2494,7 +2488,7 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_3, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			if((motor->fluxIntSum > FLUX_HIGH_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_4);
 			}
@@ -2527,7 +2521,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 4.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_4);
 				}
@@ -2557,7 +2551,7 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_4, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			if((motor->fluxIntSum < FLUX_LOW_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_5);
 			}
@@ -2590,7 +2584,7 @@ void stateEval(Motor_TypeDef* motor)
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
 					// and change state to closed wait 5.
-					if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
+					//if(motor->phaseId == PHASE_ID_ABC) {LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0);}
 					motor->isMeasuredFreqValid = 1;
 					changeState(motor, STATE_MOTOR_CLOSED_INT_5);
 				}
@@ -2620,7 +2614,7 @@ void stateEval(Motor_TypeDef* motor)
 				setPWM(motor, STEP_5, motor->duty);
 			}
 			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			if((motor->fluxIntSum > FLUX_HIGH_THRESH) || (motor->ctr > motor->prd))
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_0);
 			}
@@ -2652,21 +2646,25 @@ void stateEval(Motor_TypeDef* motor)
 // for the PI integrator
 void closedSetDuty(Motor_TypeDef* motor)
 {
-
+	motor->piMax = OPEN_DUTY_COEFF/(F_SAMP/(6*motor->measuredFreq)) + OPEN_DUTY_OFFSET + PI_MAX_TRIM;
+	if(motor->piMax < motor->piMin)
+	{
+		motor->piMax = motor->piMin + PI_MAX_TRIM;
+	}
 	motor->piError = motor->cmdFreq - motor->measuredFreq;
-	motor->piPropCalc = motor->piError/PI_PROP_CONST;
-	motor->piIntCalc = (motor->piError + motor->piSum)/(PI_INT_CONST*F_SAMP);
+	motor->piPropCalc = PI_PROP_CONST*motor->piError;
+	motor->piIntCalc = (PI_INT_CONST*(motor->piError + motor->piSum))/(F_SAMP);
 
 	// Clamp integral term
 	if(motor->piIntCalc > motor->piMax)
 	{
 		motor->piIntCalc = motor->piMax;
-		motor->piSum = PI_INT_CONST*F_SAMP*motor->piMax - motor->piError;
+		motor->piSum = F_SAMP*motor->piMax/PI_INT_CONST - motor->piError;
 	}
 	else if(motor->piIntCalc < motor->piMin)
 	{
 		motor->piIntCalc = motor->piMin;
-		motor->piSum = PI_INT_CONST*F_SAMP*motor->piMin - motor->piError;
+		motor->piSum = F_SAMP*motor->piMin/PI_INT_CONST - motor->piError;
 	}
 	else
 	{

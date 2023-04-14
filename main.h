@@ -74,6 +74,7 @@ typedef struct{
 	uint8_t dir;
 	uint32_t ctr;
 	uint32_t openPrdCtr;
+	uint32_t openAccCtr;
 	uint32_t getSpdCtr;
 	int32_t fluxIntSum;
 	uint32_t openPrdArrIdx;
@@ -179,34 +180,36 @@ void closedSetDuty(Motor_TypeDef* motor);
 #define STATE_MOTOR_DEBUG_4						5
 #define STATE_MOTOR_DEBUG_5						6
 #define STATE_MOTOR_STOP						7
-#define STATE_MOTOR_OPEN_ACC_0					8
-#define STATE_MOTOR_OPEN_ACC_1					9
-#define STATE_MOTOR_OPEN_ACC_2					10
-#define STATE_MOTOR_OPEN_ACC_3					11
-#define STATE_MOTOR_OPEN_ACC_4					12
-#define STATE_MOTOR_OPEN_ACC_5					13
-#define STATE_MOTOR_HANDOFF_0					14
-#define STATE_MOTOR_HANDOFF_1					15
-#define STATE_MOTOR_HANDOFF_2					16
-#define STATE_MOTOR_HANDOFF_3					17
-#define STATE_MOTOR_HANDOFF_4					18
-#define STATE_MOTOR_HANDOFF_5					19
-#define STATE_MOTOR_CLOSED_GET_SPD_WATCH_0		20
-#define STATE_MOTOR_CLOSED_GET_SPD_WAIT_0		21
-#define STATE_MOTOR_CLOSED_GET_SPD_WATCH_1		22
-#define STATE_MOTOR_CLOSED_GET_SPD_WAIT_1		23
-#define STATE_MOTOR_CLOSED_WATCH_0				24
-#define STATE_MOTOR_CLOSED_INT_0				25
-#define STATE_MOTOR_CLOSED_WATCH_1				26
-#define STATE_MOTOR_CLOSED_INT_1				27
-#define STATE_MOTOR_CLOSED_WATCH_2				28
-#define STATE_MOTOR_CLOSED_INT_2				29
-#define STATE_MOTOR_CLOSED_WATCH_3				30
-#define STATE_MOTOR_CLOSED_INT_3				31
-#define STATE_MOTOR_CLOSED_WATCH_4				32
-#define STATE_MOTOR_CLOSED_INT_4				33
-#define STATE_MOTOR_CLOSED_WATCH_5				34
-#define STATE_MOTOR_CLOSED_INT_5				35
+#define STATE_MOTOR_ALIGN_3						8
+#define STATE_MOTOR_ALIGN_4						9
+#define STATE_MOTOR_OPEN_ACC_0					10
+#define STATE_MOTOR_OPEN_ACC_1					11
+#define STATE_MOTOR_OPEN_ACC_2					12
+#define STATE_MOTOR_OPEN_ACC_3					13
+#define STATE_MOTOR_OPEN_ACC_4					14
+#define STATE_MOTOR_OPEN_ACC_5					15
+#define STATE_MOTOR_HANDOFF_0					16
+#define STATE_MOTOR_HANDOFF_1					17
+#define STATE_MOTOR_HANDOFF_2					18
+#define STATE_MOTOR_HANDOFF_3					19
+#define STATE_MOTOR_HANDOFF_4					20
+#define STATE_MOTOR_HANDOFF_5					21
+#define STATE_MOTOR_CLOSED_GET_SPD_WATCH_0		22
+#define STATE_MOTOR_CLOSED_GET_SPD_WAIT_0		23
+#define STATE_MOTOR_CLOSED_GET_SPD_WATCH_1		24
+#define STATE_MOTOR_CLOSED_GET_SPD_WAIT_1		25
+#define STATE_MOTOR_CLOSED_WATCH_0				26
+#define STATE_MOTOR_CLOSED_INT_0				27
+#define STATE_MOTOR_CLOSED_WATCH_1				28
+#define STATE_MOTOR_CLOSED_INT_1				29
+#define STATE_MOTOR_CLOSED_WATCH_2				30
+#define STATE_MOTOR_CLOSED_INT_2				31
+#define STATE_MOTOR_CLOSED_WATCH_3				32
+#define STATE_MOTOR_CLOSED_INT_3				33
+#define STATE_MOTOR_CLOSED_WATCH_4				34
+#define STATE_MOTOR_CLOSED_INT_4				35
+#define STATE_MOTOR_CLOSED_WATCH_5				36
+#define STATE_MOTOR_CLOSED_INT_5				37
 
 // UART CONTROL STATES
 #define STATE_CTRL_DEBUG	0
@@ -231,27 +234,34 @@ void closedSetDuty(Motor_TypeDef* motor);
 #define SPIN_CHECK_GET_SPD_TIMEOUT			50
 
 // ALIGN CONSTANTS
-#define ALIGN_TIMEOUT						2500
-#define ALIGN_DUTY							80
+#define ALIGN_TIMEOUT						1000
+#define ALIGN_DUTY							200
 
 // OPEN-LOOP CONSTANTS
-#define OPEN_DUTY_COEFF						12000
-#define OPEN_ALPHA							1
+#define F_SAMP_SQRD							25000000
+#define SIX_A1								180
+#define THREE_A2							90
+#define HANDOFF_PRD							20
+#define OPEN_DUTY_COEFF						10000
+#define OPEN_ALPHA							2
 #define PRD_ARR_OPEN_ACC_NUMEL				30
 #define OPEN_DUTY_OFFSET					0
-#define OPEN_INIT_PRD						40
+#define OPEN_INIT_PRD						10000
 #define T_SAMP								0.0002
 
 // CLOSED-LOOP CONSTANTS
 #define CLOSED_TIMEOUT				200
-#define PRD_ARR_CLOSED_REF_NUMEL	300
+#define PRD_ARR_CLOSED_REF_NUMEL	4500
 #define FLUX_HIGH_THRESH			4083
 #define FLUX_LOW_THRESH				-4083
-#define BLANK_TIME					4
-#define PI_INT_CONST				100
-#define PI_PROP_CONST				100
-#define PI_MAX_TRIM					10
+#define BLANK_TIME					0
+#define PI_INT_CONST				50
+#define PI_PROP_CONST				50
+#define PI_MAX_TRIM					1
 #define PI_MIN_TRIM					10
+#define CMD_FREQ_ARR_SIZE			127
+#define CMD_FREQ_MIN				40
+#define CMD_FREQ_MAX				83
 
 /* USER CODE END Private defines */
 
