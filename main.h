@@ -74,6 +74,7 @@ typedef struct{
 	uint8_t dir;
 	uint32_t ctr;
 	uint32_t openPrdCtr;
+	uint32_t handoffCtr;
 	uint32_t getSpdCtr;
 	int32_t fluxIntSum;
 	uint32_t openPrdArrIdx;
@@ -216,40 +217,41 @@ void closedSetDuty(Motor_TypeDef* motor);
 #define ADC_DATA_SIZE						3
 #define RX_DATA_SIZE						1
 #define TX_DATA_SIZE						50
-#define ZERO_DUTY							5000
+#define ZERO_DUTY							1000
 #define DEBUG_DUTY							80
 #define EMF_THRESH							317
 #define NOISE_THRESH						50
 #define COMMUTATION_THRESH					250
 #define KV_CONSTANT							1900
 #define NUM_POLES							4
-#define UVLO_TIMEOUT						5000
-#define F_SAMP								5000
+#define UVLO_TIMEOUT						20000
+#define F_SAMP								25000
 
 // SPIN CHECK CONSTANTS
-#define SPIN_CHECK_OBSERVE_TIMEOUT			300
-#define SPIN_CHECK_GET_SPD_TIMEOUT			50
+#define SPIN_CHECK_OBSERVE_TIMEOUT			1500
+#define SPIN_CHECK_GET_SPD_TIMEOUT			250
 
 // ALIGN CONSTANTS
-#define ALIGN_TIMEOUT						2500
+#define ALIGN_TIMEOUT						12500
 #define ALIGN_DUTY							80
 
 // OPEN-LOOP CONSTANTS
-#define OPEN_DUTY_COEFF						12000
-#define OPEN_ALPHA							1
-#define PRD_ARR_OPEN_ACC_NUMEL				30
+#define OPEN_DUTY_COEFF						10000
+#define OPEN_ALPHA							1.0
+#define PRD_ARR_OPEN_ACC_NUMEL				150
 #define OPEN_DUTY_OFFSET					0
-#define OPEN_INIT_PRD						40
-#define T_SAMP								0.0002
+#define OPEN_INIT_PRD						70
+#define T_SAMP								0.00004
 
 // CLOSED-LOOP CONSTANTS
-#define CLOSED_TIMEOUT				200
-#define PRD_ARR_CLOSED_REF_NUMEL	300
-#define FLUX_HIGH_THRESH			4083
-#define FLUX_LOW_THRESH				-4083
-#define BLANK_TIME					4
-#define PI_INT_CONST				100
-#define PI_PROP_CONST				100
+#define HANDOFF_TIMEOUT				12
+#define CLOSED_TIMEOUT				1000
+#define PRD_ARR_CLOSED_REF_NUMEL	1000
+#define FLUX_HIGH_THRESH			20000
+#define FLUX_LOW_THRESH				-20000
+#define BLANK_TIME					0
+#define PI_INT_CONST				1
+#define PI_PROP_CONST				1
 #define PI_MAX_TRIM					10
 #define PI_MIN_TRIM					10
 

@@ -354,7 +354,7 @@ static void MX_TIM1_Init(void)
   /* USER CODE END TIM1_Init 1 */
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_CENTER_UP_DOWN;
-  TIM_InitStruct.Autoreload = 10000;
+  TIM_InitStruct.Autoreload = 2000;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   TIM_InitStruct.RepetitionCounter = 1;
   LL_TIM_Init(TIM1, &TIM_InitStruct);
@@ -438,7 +438,7 @@ static void MX_TIM2_Init(void)
   /* USER CODE END TIM2_Init 1 */
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_CENTER_UP_DOWN;
-  TIM_InitStruct.Autoreload = 10000;
+  TIM_InitStruct.Autoreload = 2000;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   LL_TIM_Init(TIM2, &TIM_InitStruct);
   LL_TIM_EnableARRPreload(TIM2);
@@ -516,7 +516,7 @@ static void MX_TIM3_Init(void)
   /* USER CODE END TIM3_Init 1 */
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_CENTER_UP_DOWN;
-  TIM_InitStruct.Autoreload = 10000;
+  TIM_InitStruct.Autoreload = 2000;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   LL_TIM_Init(TIM3, &TIM_InitStruct);
   LL_TIM_EnableARRPreload(TIM3);
@@ -590,7 +590,7 @@ static void MX_TIM4_Init(void)
   /* USER CODE END TIM4_Init 1 */
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_CENTER_UP_DOWN;
-  TIM_InitStruct.Autoreload = 10000;
+  TIM_InitStruct.Autoreload = 2000;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   LL_TIM_Init(TIM4, &TIM_InitStruct);
   LL_TIM_EnableARRPreload(TIM4);
@@ -671,7 +671,7 @@ static void MX_TIM5_Init(void)
   /* USER CODE END TIM5_Init 1 */
   TIM_InitStruct.Prescaler = 0;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
-  TIM_InitStruct.Autoreload = 19999;
+  TIM_InitStruct.Autoreload = 3999;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   LL_TIM_Init(TIM5, &TIM_InitStruct);
   LL_TIM_EnableARRPreload(TIM5);
@@ -680,7 +680,7 @@ static void MX_TIM5_Init(void)
   TIM_OC_InitStruct.OCMode = LL_TIM_OCMODE_PWM1;
   TIM_OC_InitStruct.OCState = LL_TIM_OCSTATE_DISABLE;
   TIM_OC_InitStruct.OCNState = LL_TIM_OCSTATE_DISABLE;
-  TIM_OC_InitStruct.CompareValue = 10000;
+  TIM_OC_InitStruct.CompareValue = 2000;
   TIM_OC_InitStruct.OCPolarity = LL_TIM_OCPOLARITY_HIGH;
   LL_TIM_OC_Init(TIM5, LL_TIM_CHANNEL_CH1, &TIM_OC_InitStruct);
   LL_TIM_OC_DisableFast(TIM5, LL_TIM_CHANNEL_CH1);
@@ -1376,6 +1376,7 @@ void changeState(Motor_TypeDef* motor, uint8_t newState)
 
 		case STATE_MOTOR_STOP:
 			setPWM(motor, STEP_Z, 0);
+			motor->handoffCtr = 0;
 			motor->isMeasuredFreqValid = 0;
 			motor->openPrdArrIdx = 0;
 			motor->openPrdCtr = 0;
@@ -1682,7 +1683,7 @@ void stateEval(Motor_TypeDef* motor)
 			// motor->duty = OPEN_DUTY_COEFF/motor->prd + OPEN_DUTY_OFFSET;
 			// setPWM(motor, STEP_0, motor->duty);
 			//changeState(motor, STATE_MOTOR_CLOSED_GET_SPD_WATCH_0);
-			motor->piSum = PI_INT_CONST*F_SAMP*motor->duty;
+			motor->piSum = (F_SAMP*motor->duty)/PI_INT_CONST;
 			changeState(motor, STATE_MOTOR_HANDOFF_0);
 		}
 		break;
@@ -1940,26 +1941,45 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_0, motor->duty);
 	case STATE_MOTOR_HANDOFF_0:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < CLOSED_TIMEOUT)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
-				    (motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_0);
+					if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_0);
+					}
+					/*else if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_3);
+					}*/
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				//motor->handoffCtr++;
+				//changeState(motor, STATE_MOTOR_HANDOFF_1);
+				changeState(motor, STATE_MOTOR_STOP);
+				txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+				uartTx((uint32_t*) txdata, txlength);
 			}
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_1);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -1970,26 +1990,42 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_1, motor->duty);
 	case STATE_MOTOR_HANDOFF_1:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < motor->prd)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
-					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_1);
+					if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_1);
+					}
+					else if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_4);
+					}
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				motor->handoffCtr++;
+				changeState(motor, STATE_MOTOR_HANDOFF_2);
 			}
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_2);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2000,26 +2036,42 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_2, motor->duty);
 	case STATE_MOTOR_HANDOFF_2:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < motor->prd)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
-					(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_2);
+					if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_2);
+					}
+					else if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_5);
+					}
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				motor->handoffCtr++;
+				changeState(motor, STATE_MOTOR_HANDOFF_3);
 			}
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_3);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2030,26 +2082,42 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_3, motor->duty);
 	case STATE_MOTOR_HANDOFF_3:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < motor->prd)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
-					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_3);
+					if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_3);
+					}
+					else if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_0);
+					}
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				motor->handoffCtr++;
+				changeState(motor, STATE_MOTOR_HANDOFF_4);
 			}
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_4);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2060,26 +2128,42 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_4, motor->duty);
 	case STATE_MOTOR_HANDOFF_4:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < motor->prd)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
-					(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_4);
+					if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_4);
+					}
+					else if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_1);
+					}
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				motor->handoffCtr++;
+				changeState(motor, STATE_MOTOR_HANDOFF_5);
 			}
 		}
 		else
 		{
-			changeState(motor, STATE_MOTOR_HANDOFF_5);
+			changeState(motor, STATE_MOTOR_STOP);
+			txlength = snprintf((char*) txdata, TX_DATA_SIZE, "Handoff stopped!\n\r");
+			uartTx((uint32_t*) txdata, txlength);
 		}
 		break;
 
@@ -2090,21 +2174,35 @@ void stateEval(Motor_TypeDef* motor)
 	// 3. motor->ctr = 0;
 	// 4. setPWM(motor, STEP_5, motor->duty);
 	case STATE_MOTOR_HANDOFF_5:
-		if(motor->ctr < motor->prd)
+		if(motor->handoffCtr < HANDOFF_TIMEOUT)
 		{
-			motor->ctr++;
-			if(motor->ctr > BLANK_TIME)
+			if(motor->ctr < motor->prd)
 			{
-				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
-					(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+				motor->ctr++;
+				if(motor->ctr > BLANK_TIME)
 				{
-					if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
-					changeState(motor, STATE_MOTOR_CLOSED_INT_5);
+					if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2))&&
+						(motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_5);
+					}
+					else if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2))&&
+							(motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+					{
+						if(motor->phaseId == PHASE_ID_ABC){ LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
+						changeState(motor, STATE_MOTOR_CLOSED_INT_2);
+					}
+				}
+				else
+				{
+					motor->isPrevValValid = 1;
 				}
 			}
 			else
 			{
-				motor->isPrevValValid = 1;
+				motor->handoffCtr++;
+				changeState(motor, STATE_MOTOR_HANDOFF_0);
 			}
 		}
 		else
@@ -2197,8 +2295,8 @@ void stateEval(Motor_TypeDef* motor)
 			motor->getSpdCtr++;
 			if(motor->ctr > 2)
 			{
-				if((adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				   (motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+				if((adcdata[motor->adcDataZPhaseIdx] >= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				   (motor->zPhasePrevVal < (124*motor->dcBusPrevVal/280)) )
 				{
 					changeState(motor, STATE_MOTOR_CLOSED_INT_4);
 					if(motor->phaseId == PHASE_ID_ABC) { LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_0); }
@@ -2237,8 +2335,8 @@ void stateEval(Motor_TypeDef* motor)
 			if(motor->ctr > BLANK_TIME)
 			{
 				// Zero cross detected?
-				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				    (motor->zPhasePrevVal > (motor->dcBusPrevVal/2)))
+				if( (adcdata[motor->adcDataZPhaseIdx] <= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				    (motor->zPhasePrevVal > (124*motor->dcBusPrevVal/280)))
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2281,8 +2379,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_0, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum <= FLUX_LOW_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_1);
 			}
@@ -2312,8 +2410,8 @@ void stateEval(Motor_TypeDef* motor)
 			if(motor->ctr > BLANK_TIME)
 			{
 				// Zero cross detected?
-				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				    (motor->zPhasePrevVal < (motor->dcBusPrevVal/2)))
+				if( (adcdata[motor->adcDataZPhaseIdx] >= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				    (motor->zPhasePrevVal < (124*motor->dcBusPrevVal/280)))
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2359,8 +2457,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_1, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum >= FLUX_HIGH_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_2);
 			}
@@ -2395,8 +2493,8 @@ void stateEval(Motor_TypeDef* motor)
 			if(motor->ctr > BLANK_TIME)
 			{
 				// Zero cross detected?
-				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				    (motor->zPhasePrevVal > (motor->dcBusPrevVal/2)))
+				if( (adcdata[motor->adcDataZPhaseIdx] <= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				    (motor->zPhasePrevVal > (124*motor->dcBusPrevVal/280)))
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2430,8 +2528,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_2, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum <= FLUX_LOW_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_3);
 			}
@@ -2458,8 +2556,8 @@ void stateEval(Motor_TypeDef* motor)
 			if(motor->ctr > BLANK_TIME)
 			{
 				// Zero cross detected?
-				if( (adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				    (motor->zPhasePrevVal < (motor->dcBusPrevVal/2)) )
+				if( (adcdata[motor->adcDataZPhaseIdx] >= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				    (motor->zPhasePrevVal < (124*motor->dcBusPrevVal/280)) )
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2493,8 +2591,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_3, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum >= FLUX_HIGH_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_4);
 			}
@@ -2522,7 +2620,7 @@ void stateEval(Motor_TypeDef* motor)
 			{
 				// Zero cross detected?
 				if( (adcdata[motor->adcDataZPhaseIdx] <= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				    (motor->zPhasePrevVal > (motor->dcBusPrevVal/2)) )
+				    (motor->zPhasePrevVal > (124*motor->dcBusPrevVal/280)) )
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2556,8 +2654,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_4, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum < FLUX_LOW_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum <= FLUX_LOW_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_5);
 			}
@@ -2584,8 +2682,8 @@ void stateEval(Motor_TypeDef* motor)
 			if(motor->ctr > BLANK_TIME)
 			{
 				// Zero cross detected?
-				if((adcdata[motor->adcDataZPhaseIdx] >= (adcdata[motor->adcDataDcBusIdx]/2)) &&
-				   (motor->zPhasePrevVal < (motor->dcBusPrevVal/2)))
+				if((adcdata[motor->adcDataZPhaseIdx] >= (124*adcdata[motor->adcDataDcBusIdx]/280)) &&
+				   (motor->zPhasePrevVal < (124*motor->dcBusPrevVal/280)))
 				{
 					// Set isPrevValValid to 0, set prd to ctr,
 					// set timeout to 2*prd, set ctr to 0, run PI calc,
@@ -2619,8 +2717,8 @@ void stateEval(Motor_TypeDef* motor)
 				closedSetDuty(motor);
 				setPWM(motor, STEP_5, motor->duty);
 			}
-			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (adcdata[motor->adcDataDcBusIdx]/2);
-			if(motor->fluxIntSum > FLUX_HIGH_THRESH)
+			motor->fluxIntSum += adcdata[motor->adcDataZPhaseIdx] - (124*adcdata[motor->adcDataDcBusIdx]/280);
+			if(motor->fluxIntSum >= FLUX_HIGH_THRESH)
 			{
 				changeState(motor, STATE_MOTOR_CLOSED_WATCH_0);
 			}
@@ -2654,19 +2752,21 @@ void closedSetDuty(Motor_TypeDef* motor)
 {
 
 	motor->piError = motor->cmdFreq - motor->measuredFreq;
-	motor->piPropCalc = motor->piError/PI_PROP_CONST;
-	motor->piIntCalc = (motor->piError + motor->piSum)/(PI_INT_CONST*F_SAMP);
+	motor->piPropCalc = motor->piError*PI_PROP_CONST;
+	//motor->piIntCalc = (motor->piError + motor->piSum)/(PI_INT_CONST*F_SAMP);
+	motor->piIntCalc = PI_INT_CONST*(motor->piError + motor->piSum)/(F_SAMP);
 
 	// Clamp integral term
 	if(motor->piIntCalc > motor->piMax)
 	{
 		motor->piIntCalc = motor->piMax;
-		motor->piSum = PI_INT_CONST*F_SAMP*motor->piMax - motor->piError;
+		//motor->piSum = PI_INT_CONST*F_SAMP*motor->piMax - motor->piError;
+		motor->piSum = (F_SAMP*motor->piMax)/PI_INT_CONST - motor->piError;
 	}
 	else if(motor->piIntCalc < motor->piMin)
 	{
 		motor->piIntCalc = motor->piMin;
-		motor->piSum = PI_INT_CONST*F_SAMP*motor->piMin - motor->piError;
+		motor->piSum = (F_SAMP*motor->piMin)/PI_INT_CONST - motor->piError;
 	}
 	else
 	{
